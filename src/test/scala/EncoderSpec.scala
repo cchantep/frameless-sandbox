@@ -1,5 +1,6 @@
 package cchantep.sandbox
 
+import org.apache.spark.sql.types._
 import org.apache.spark.sql.{ functions => F }
 
 import frameless._
@@ -23,8 +24,20 @@ final class EncoderSpec
       )
     }
 
-    "be read from unsafe dataframe as CaseClass1" in {
-      val df = Seq("Foo").toDF.select(F.struct(F.column("value").as("name")))
+    "be read as ClassClass1" in {
+      val df = Seq("""{"name":"Foo"}""").toDF
+        .withColumn(
+          "foo",
+          F.from_json(
+            F.column("value"),
+            StructType(
+              Seq(
+                StructField("name", StringType, true)
+              )
+            )
+          )
+        )
+        .select("foo.*")
 
       TypedDataset.createUnsafe[CaseClass1](df).collect().run() must_=== Seq(
         CaseClass1(new Name1("Foo"))
@@ -33,18 +46,25 @@ final class EncoderSpec
            Error while decoding: java.lang.RuntimeException: Couldn't find a valid constructor on class cchantep.sandbox.CaseClass1
          */
       )
-    } tag "wip"
+    }
 
-    "be read from safe dataset as CaseClass1" in {
-      TypedDataset
-        .create[CaseClass1](Seq(CaseClass1(new Name1("Foo"))))
-        .collect()
-        .run() must_=== Seq(
-        CaseClass1(new Name1("Foo"))
-        /* Test failure:
+    "be read as ClassClass2" in {
+      val df = Seq("""{"name":"Foo"}""").toDF
+        .withColumn(
+          "foo",
+          F.from_json(
+            F.column("value"),
+            StructType(
+              Seq(
+                StructField("name", StringType, true)
+              )
+            )
+          )
+        )
+        .select("foo.*")
 
-           java.lang.ClassCastException: java.base/java.lang.String cannot be cast to cchantep.sandbox.Name1
-         */
+      TypedDataset.createUnsafe[CaseClass2](df).collect().run() must_=== Seq(
+        CaseClass2(new Name2("Foo"))
       )
     }
   }
@@ -57,3 +77,30 @@ final class Name1(val value: String) extends AnyVal {
 }
 
 case class CaseClass1(name: Name1)
+
+final class Name2(val value: String) extends AnyVal {
+  override def toString = value
+}
+
+object Name2 {
+  import org.apache.spark.sql.types.{ DataType, StringType }
+  import org.apache.spark.sql.catalyst.expressions._, objects._
+
+  implicit def encoder: TypedEncoder[Name2] = new TypedEncoder[Name2] {
+    val nullable: Boolean = true
+
+    val jvmRepr: DataType = StringType
+
+    val catalystRepr: DataType = StringType
+
+    def fromCatalyst(path: Expression): Expression = {
+      println(s"path: ${path.getClass} = $path")
+      TypedEncoder.stringEncoder.fromCatalyst(path)
+    }
+
+    def toCatalyst(path: Expression): Expression =
+      Invoke(path, "value", jvmRepr)
+  }
+}
+
+case class CaseClass2(name: Name2)
