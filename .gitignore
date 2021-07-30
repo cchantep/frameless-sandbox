@@ -1,0 +1,4 @@
+# SBT
+**/target
+project/project
+.bsp
