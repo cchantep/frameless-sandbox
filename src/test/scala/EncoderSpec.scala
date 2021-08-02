@@ -65,19 +65,49 @@ final class EncoderSpec
             F.column("value"),
             StructType(
               Seq(
-                StructField("name", StringType, true)
+                StructField("name", StringType, false),
+                StructField("value", StringType, true)
               )
             )
           )
         )
         .select("foo.*")
 
-      implicit val nameFieldEncoder = Name2.encoder
+      implicit val nameFieldEncoder: TypedEncoder[Name2] = Name2.encoder
+
+      implicit def optEncoder: TypedEncoder[Option[Name2]] =
+        new TypedEncoder[Option[Name2]] {
+          import org.apache.spark.sql.catalyst.expressions._, objects._
+
+          val nullable: Boolean = true
+
+          val jvmRepr: DataType = ObjectType(classOf[Name2])
+
+          val catalystRepr: DataType = StringType
+
+          def toCatalyst(path: Expression): Expression =
+            nameFieldEncoder.toCatalyst(UnwrapOption(catalystRepr, path))
+
+          def fromCatalyst(path: Expression): Expression = {
+            val javaValue = nameFieldEncoder.fromCatalyst(path)
+
+            val value = NewInstance(
+              classOf[Name2],
+              Seq(javaValue),
+              jvmRepr
+            )
+
+            WrapOption(value, jvmRepr)
+          }
+        }
+
+      implicit val encoder: TypedEncoder[CaseClass2] =
+        TypedEncoder.usingDerivation
 
       TypedDataset.createUnsafe[CaseClass2](df).collect().run() must_=== Seq(
-        CaseClass2(new Name2("Foo"))
+        CaseClass2(new Name2("Foo"), None)
       )
-    }
+    } tag "wip"
   }
 }
 
@@ -102,18 +132,12 @@ object Name2 {
 
     val catalystRepr: DataType = StringType
 
-    def fromCatalyst(path: Expression): Expression = {
-      println(s"path: ${path.getClass} = $path")
-      val str = TypedEncoder.stringEncoder.fromCatalyst(path)
-      //NewInstance(classOf[Name2], Seq(str), jvmRepr, nullable)
-      str
-    }
+    def fromCatalyst(path: Expression): Expression =
+      TypedEncoder.stringEncoder.fromCatalyst(path)
 
-    def toCatalyst(path: Expression): Expression = {
-      println(s"toCatalyst: $path")
+    def toCatalyst(path: Expression): Expression =
       Invoke(path, "value", jvmRepr)
-    }
   }
 }
 
-case class CaseClass2(name: Name2)
+case class CaseClass2(name: Name2, opt: Option[Name2])
