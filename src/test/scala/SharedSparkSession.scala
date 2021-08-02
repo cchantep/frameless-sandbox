@@ -5,7 +5,6 @@ import scala.util.control.NonFatal
 import org.apache.spark.sql.SparkSession
 
 trait SharedSparkSession {
-
   var sparkSession: SparkSession = _
 
   def withSpark[T](f: SparkSession => T): T = {
