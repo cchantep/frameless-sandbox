@@ -22,7 +22,7 @@ final class EncoderSpec
         .run() must_=== Seq(
         new Name1("Lorem")
       )
-    }
+    } tag "ok"
 
     "be read as ClassClass1" in {
       val df = Seq("""{"name":"Foo"}""").toDF
@@ -46,7 +46,7 @@ final class EncoderSpec
            Error while decoding: java.lang.RuntimeException: Couldn't find a valid constructor on class cchantep.sandbox.CaseClass1
          */
       )
-    }
+    } tag "ko"
 
     "be read as Name2 from scalar row (without fieldEncoder)" in {
       TypedDataset
@@ -85,7 +85,7 @@ final class EncoderSpec
         CaseClass2(new Name2("Foo"), None),
         CaseClass2(new Name2("Bar"), Some(new Name2("ipsum")))
       )
-    }
+    } tag "ok"
 
     "be read as ClassClass3" in {
       val df =
@@ -141,7 +141,74 @@ final class EncoderSpec
           )
         )
       )
-    } tag "wip"
+    } tag "ok"
+
+    "set name column on CaseClass2 (failed)" in {
+      val df =
+        Seq("""{"name":"XYZ"}""").toDF
+          .withColumn(
+            "foo",
+            F.from_json(
+              F.column("value"),
+              StructType(
+                Seq(
+                  StructField("name", StringType, false),
+                  StructField("opt", StringType, true)
+                )
+              )
+            )
+          )
+          .select("foo.*")
+
+      implicit def nameEncoder: TypedEncoder[Name2] = Name2.fieldEncoder
+
+      import Name2.optEncoder
+
+      implicit val encoder: TypedEncoder[CaseClass2] =
+        TypedEncoder.usingDerivation
+
+      /* requirement failed: Literal must have a corresponding value to cchantep.sandbox.Name2, but class Some found. (literals.scala:215) */
+      TypedDataset
+        .createUnsafe[CaseClass2](df)
+        .withColumnReplaced('name, functions.lit(new Name2("Foo")))
+        .collect()
+        .run()
+        .headOption must beSome(CaseClass2(name = new Name2("Foo"), opt = None))
+
+    } tag "ko"
+
+    "set name column on CaseClass2 (successful)" in {
+      val df =
+        Seq("""{"name":"XYZ"}""").toDF
+          .withColumn(
+            "foo",
+            F.from_json(
+              F.column("value"),
+              StructType(
+                Seq(
+                  StructField("name", StringType, false),
+                  StructField("opt", StringType, true)
+                )
+              )
+            )
+          )
+          .select("foo.*")
+
+      implicit def nameEncoder: TypedEncoder[Name2] = Name2.fieldEncoder
+
+      import Name2.optEncoder
+
+      implicit val encoder: TypedEncoder[CaseClass2] =
+        TypedEncoder.usingDerivation
+
+      TypedDataset
+        .createUnsafe[CaseClass2](df)
+        .withColumnReplaced('name, ValueClassLiteral.lit(new Name2("Foo")))
+        .collect()
+        .run()
+        .headOption must beSome(CaseClass2(name = new Name2("Foo"), opt = None))
+
+    } tag "ok"
   }
 }
 
@@ -157,7 +224,7 @@ final class Name2(val value: String) extends AnyVal
 
 object Name2 {
   import org.apache.spark.sql.types.{ DataType, StringType }
-  import org.apache.spark.sql.catalyst.expressions._, objects._
+  import org.apache.spark.sql.catalyst.expressions._ //, objects._
 
   // Only when Value class is used as struct field
   def fieldEncoder: TypedEncoder[Name2] = new TypedEncoder[Name2] {
@@ -171,7 +238,7 @@ object Name2 {
       TypedEncoder.stringEncoder.fromCatalyst(path)
 
     def toCatalyst(path: Expression): Expression =
-      Invoke(path, "value", jvmRepr)
+      path // Invoke(path, "value", jvmRepr)
   }
 
   implicit def optEncoder: TypedEncoder[Option[Name2]] =
